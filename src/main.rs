@@ -64,4 +64,12 @@ mod test {
         assert!(ret.is_ok());
         assert!(ret.unwrap().len() == 2);
     }
+
+    #[test]
+    fn test_read_csv_ok_with_four_decimal() {
+        let ret = read_csv("testdata/transactions.csv");
+        let tr = ret.unwrap();
+        assert!(tr[0].amount == 1.0191);
+        assert!(tr[1].amount == 2.0001);
+    }
 }
