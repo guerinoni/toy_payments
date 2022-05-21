@@ -31,7 +31,7 @@ struct Transaction {
 
     // Transaction ID.
     #[serde(alias = "tx")]
-    transaction_id: u32,
+    transaction_id: TransactionID,
 
     amount: f32,
 }
@@ -52,7 +52,7 @@ fn read_csv(path: &str) -> Result<Vec<Transaction>, Box<dyn Error>> {
 struct Account {
     // Client ID.
     #[serde(rename = "client")]
-    client_id: u16,
+    client_id: ClientID,
 
     // Total founds available for trading.
     // Should be equal to (total - held).
@@ -108,6 +108,7 @@ enum TransactionType {
     Deposit,
     Withdrawal,
     Dispute,
+    Resolve,
 }
 
 impl std::str::FromStr for TransactionType {
@@ -118,14 +119,20 @@ impl std::str::FromStr for TransactionType {
             "deposit" => Ok(TransactionType::Deposit),
             "withdrawal" => Ok(TransactionType::Withdrawal),
             "dispute" => Ok(TransactionType::Dispute),
+            "resolve" => Ok(TransactionType::Resolve),
             _ => Err(format!("'{}' is not a valid value for TransactionType", s)),
         }
     }
 }
 
+type TransactionID = u32;
+type TransactionIndex = usize;
+type ClientID = u16;
+
 #[derive(Default)]
 struct Engine {
-    client_account: HashMap<u16, Account>,
+    client_account: HashMap<ClientID, Account>,
+    transaction_under_dispute: HashMap<TransactionIndex, bool>,
 }
 
 impl Engine {
@@ -164,6 +171,25 @@ impl Engine {
                     let amount = transactions[idx].amount;
                     account.available -= amount;
                     account.held += amount;
+                    self.transaction_under_dispute.insert(idx, true);
+                }
+                TransactionType::Resolve => {
+                    let idx = match transactions
+                        .iter()
+                        .position(|t| t.transaction_id == tr.transaction_id)
+                    {
+                        Some(index) => index,
+                        None => continue,
+                    };
+
+                    match self.transaction_under_dispute.get(&idx) {
+                        Some(_) => self.transaction_under_dispute.remove(&idx),
+                        None => continue,
+                    };
+
+                    let amount = transactions[idx].amount;
+                    account.available += amount;
+                    account.held -= amount;
                 }
             }
         }
@@ -383,5 +409,113 @@ mod test {
         assert_eq!(account.available, 11.0);
         assert_eq!(account.held, 0.0);
         assert_eq!(account.total, 11.0);
+    }
+
+    #[test]
+    fn test_resolve_increase_available_decrease_held() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "dispute".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+        let t2 = Transaction {
+            kind: "resolve".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1, t2]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.total, 11.0);
+        assert_eq!(account.held, 0.0);
+    }
+
+    #[test]
+    fn test_resolve_refere_to_not_existing_transaction() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "resolve".to_string(),
+            client_id: 1,
+            transaction_id: 11,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.total, 11.0);
+        assert_eq!(account.held, 0.0);
+    }
+
+    #[test]
+    fn test_resolve_refere_to_transaction_not_under_dispute() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "resolve".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.total, 11.0);
+        assert_eq!(account.held, 0.0);
     }
 }
