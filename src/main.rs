@@ -2,6 +2,7 @@ use csv::Writer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
+use std::fmt::format;
 use std::io::{ErrorKind, Write};
 use std::process;
 
@@ -138,6 +139,13 @@ impl Engine {
                 account.total += tr.amount;
             }
             TransactionType::Withdrawal => {
+                if account.available < tr.amount {
+                    let msg = format!(
+                        "engine error: Client ID {} doesn't have sufficient avalable",
+                        account.client_id
+                    );
+                    return Err(msg.into());
+                }
                 account.available -= tr.amount;
                 account.total -= tr.amount;
             }
@@ -270,5 +278,26 @@ mod test {
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 5.0);
         assert_eq!(account.available, account.total);
+    }
+
+    #[test]
+    fn test_withdrawal_with_not_sufficient_available() {
+        let t = Transaction {
+            kind: "withdrawal".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 5.0,
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 3.0,
+            available: 3.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+        assert!(e.process_transaction(&t).is_err());
     }
 }
