@@ -107,6 +107,7 @@ mod four_precision_number_format {
 enum TransactionType {
     Deposit,
     Withdrawal,
+    Dispute,
 }
 
 impl std::str::FromStr for TransactionType {
@@ -116,6 +117,7 @@ impl std::str::FromStr for TransactionType {
         match s {
             "deposit" => Ok(TransactionType::Deposit),
             "withdrawal" => Ok(TransactionType::Withdrawal),
+            "dispute" => Ok(TransactionType::Dispute),
             _ => Err(format!("'{}' is not a valid value for TransactionType", s)),
         }
     }
@@ -148,6 +150,10 @@ impl Engine {
                 }
                 account.available -= tr.amount;
                 account.total -= tr.amount;
+            },
+            TransactionType::Dispute => {
+                account.available -= tr.amount;
+                account.held += tr.amount;
             }
         }
 
@@ -299,5 +305,31 @@ mod test {
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
         assert!(e.process_transaction(&t).is_err());
+    }
+
+    #[test]
+    fn test_dispute_decrease_available_increase_held() {
+        let t = Transaction {
+            kind: "dispute".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 5.0,
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 11.0,
+            available: 11.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+        assert!(e.process_transaction(&t).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 6.0);
+        assert_eq!(account.held, 5.0);
     }
 }
