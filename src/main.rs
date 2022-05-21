@@ -2,7 +2,7 @@ use csv::Writer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::io::Write;
+use std::io::{ErrorKind, Write};
 use std::process;
 
 fn main() {
@@ -126,25 +126,24 @@ struct Engine {
 }
 
 impl Engine {
-    fn process_transaction(&mut self, tr: &Transaction) {
+    fn process_transaction(&mut self, tr: &Transaction) -> Result<(), Box<dyn Error>> {
+        let account = match self.client_account.get_mut(&tr.client_id) {
+            Some(a) => a,
+            None => return Err("engine error: Client ID not found".into()),
+        };
+
         match tr.kind.parse().unwrap() {
             TransactionType::Deposit => {
-                self.client_account
-                    .entry(tr.client_id)
-                    .and_modify(|account| {
-                        account.available += tr.amount;
-                        account.total += tr.amount;
-                    });
+                account.available += tr.amount;
+                account.total += tr.amount;
             }
             TransactionType::Withdrawal => {
-                self.client_account
-                    .entry(tr.client_id)
-                    .and_modify(|account| {
-                        account.available -= tr.amount;
-                        account.total -= tr.amount;
-                    });
+                account.available -= tr.amount;
+                account.total -= tr.amount;
             }
         }
+
+        Ok(())
     }
 }
 
@@ -241,7 +240,7 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        e.process_transaction(&t);
+        assert!(e.process_transaction(&t).is_ok());
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 2.0);
@@ -266,7 +265,7 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        e.process_transaction(&t);
+        assert!(e.process_transaction(&t).is_ok());
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 5.0);
