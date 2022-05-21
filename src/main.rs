@@ -19,7 +19,7 @@ fn main() {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Default, Deserialize)]
 struct Transaction {
     // Type of transaction.
     #[serde(alias = "type")]
@@ -129,31 +129,42 @@ struct Engine {
 }
 
 impl Engine {
-    fn process_transaction(&mut self, tr: &Transaction) -> Result<(), Box<dyn Error>> {
-        let account = match self.client_account.get_mut(&tr.client_id) {
-            Some(a) => a,
-            None => return Err("engine error: Client ID not found".into()),
-        };
+    fn process_transactions(&mut self, transactions: &[Transaction]) -> Result<(), Box<dyn Error>> {
+        for tr in transactions {
+            let account = match self.client_account.get_mut(&tr.client_id) {
+                Some(a) => a,
+                None => return Err("engine error: Client ID not found".into()),
+            };
 
-        match tr.kind.parse().unwrap() {
-            TransactionType::Deposit => {
-                account.available += tr.amount;
-                account.total += tr.amount;
-            }
-            TransactionType::Withdrawal => {
-                if account.available < tr.amount {
-                    let msg = format!(
-                        "engine error: Client ID {} doesn't have sufficient avalable",
-                        account.client_id
-                    );
-                    return Err(msg.into());
+            match tr.kind.parse().unwrap() {
+                TransactionType::Deposit => {
+                    account.available += tr.amount;
+                    account.total += tr.amount;
                 }
-                account.available -= tr.amount;
-                account.total -= tr.amount;
-            },
-            TransactionType::Dispute => {
-                account.available -= tr.amount;
-                account.held += tr.amount;
+                TransactionType::Withdrawal => {
+                    if account.available < tr.amount {
+                        let msg = format!(
+                            "engine error: Client ID {} doesn't have sufficient avalable",
+                            account.client_id
+                        );
+                        return Err(msg.into());
+                    }
+                    account.available -= tr.amount;
+                    account.total -= tr.amount;
+                }
+                TransactionType::Dispute => {
+                    let idx = match transactions
+                        .iter()
+                        .position(|t| t.transaction_id == tr.transaction_id)
+                    {
+                        Some(index) => index,
+                        None => continue,
+                    };
+
+                    let amount = transactions[idx].amount;
+                    account.available -= amount;
+                    account.held += amount;
+                }
             }
         }
 
@@ -254,7 +265,7 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        assert!(e.process_transaction(&t).is_ok());
+        assert!(e.process_transactions(&vec![t]).is_ok());
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 2.0);
@@ -279,7 +290,7 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        assert!(e.process_transaction(&t).is_ok());
+        assert!(e.process_transactions(&vec![t]).is_ok());
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 5.0);
@@ -304,32 +315,39 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        assert!(e.process_transaction(&t).is_err());
+        assert!(e.process_transactions(&vec![t]).is_err());
     }
 
     #[test]
     fn test_dispute_decrease_available_increase_held() {
-        let t = Transaction {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
             kind: "dispute".to_string(),
             client_id: 1,
             transaction_id: 1,
-            amount: 5.0,
+            ..Default::default()
         };
 
         let a = Account {
             client_id: 1,
-            total: 11.0,
-            available: 11.0,
+            total: 1.0,
+            available: 1.0,
             held: 0.0,
             ..Default::default()
         };
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        assert!(e.process_transaction(&t).is_ok());
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
 
         let account = e.client_account.get(&1u16).unwrap();
-        assert_eq!(account.available, 6.0);
-        assert_eq!(account.held, 5.0);
+        assert_eq!(account.available, 1.0);
+        // assert_eq!(account.held, 10.0);
     }
 }
