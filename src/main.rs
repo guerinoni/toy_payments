@@ -1,5 +1,8 @@
+use csv::Writer;
 use serde::Deserialize;
+use serde::Serialize;
 use std::error::Error;
+use std::io::Write;
 use std::process;
 
 fn main() {
@@ -44,6 +47,38 @@ fn read_csv(path: &str) -> Result<Vec<Transaction>, Box<dyn Error>> {
     Ok(transactions)
 }
 
+#[derive(Serialize)]
+struct Account {
+    // Client ID.
+    #[serde(rename = "client")]
+    client_id: u16,
+
+    // Total founds available for trading.
+    // Should be equal to (total - held).
+    available: f32,
+
+    // Total founds held for dispute.
+    // Should be equal to (total - available).
+    held: f32,
+
+    // The total funds that are available or held.
+    //This should be equal to (available + held).
+    total: f32,
+
+    // When charge back occurs, account is locked.
+    locked: bool,
+}
+
+fn write_accounts(accounts: &[Account], write_impl: &mut impl Write) -> Result<(), Box<dyn Error>> {
+    let mut writer = Writer::from_writer(write_impl);
+    for a in accounts.iter() {
+        writer.serialize(a)?;
+    }
+
+    writer.flush()?;
+    Ok(())
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -71,5 +106,35 @@ mod test {
         let tr = ret.unwrap();
         assert!(tr[0].amount == 1.0191);
         assert!(tr[1].amount == 2.0001);
+    }
+
+    #[test]
+    fn test_serialize_account_ok() {
+        let a = Account {
+            client_id: 1,
+            available: 1.5,
+            held: 0.0,
+            total: 1.5,
+            locked: false,
+        };
+
+        let b = Account {
+            client_id: 2,
+            available: 2.0,
+            held: 0.0,
+            total: 2.0,
+            locked: false,
+        };
+
+        let accounts = vec![a, b];
+
+        let mut output: Vec<u8> = Vec::new();
+        let ret = write_accounts(&accounts, &mut output);
+        assert!(ret.is_ok());
+        let data = String::from_utf8(output);
+        assert!(data.is_ok());
+        let expected = std::fs::read_to_string("testdata/accounts.csv");
+        assert!(expected.is_ok());
+        assert_eq!(data.unwrap(), expected.unwrap());
     }
 }
