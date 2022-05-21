@@ -1,6 +1,5 @@
 use csv::Writer;
-use serde::Deserialize;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
 use std::io::Write;
@@ -106,6 +105,7 @@ mod four_precision_number_format {
 
 enum TransactionType {
     Deposit,
+    Withdrawal,
 }
 
 impl std::str::FromStr for TransactionType {
@@ -114,6 +114,7 @@ impl std::str::FromStr for TransactionType {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
             "deposit" => Ok(TransactionType::Deposit),
+            "withdrawal" => Ok(TransactionType::Withdrawal),
             _ => Err(format!("'{}' is not a valid value for TransactionType", s)),
         }
     }
@@ -133,6 +134,14 @@ impl Engine {
                     .and_modify(|account| {
                         account.available += tr.amount;
                         account.total += tr.amount;
+                    });
+            }
+            TransactionType::Withdrawal => {
+                self.client_account
+                    .entry(tr.client_id)
+                    .and_modify(|account| {
+                        account.available -= tr.amount;
+                        account.total -= tr.amount;
                     });
             }
         }
@@ -236,6 +245,31 @@ mod test {
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 2.0);
+        assert_eq!(account.available, account.total);
+    }
+
+    #[test]
+    fn test_withdrawal_decrease_available_and_total() {
+        let t = Transaction {
+            kind: "withdrawal".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 5.0,
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 10.0,
+            available: 10.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+        e.process_transaction(&t);
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 5.0);
         assert_eq!(account.available, account.total);
     }
 }
