@@ -55,14 +55,17 @@ struct Account {
 
     // Total founds available for trading.
     // Should be equal to (total - held).
+    #[serde(with = "four_precision_number_format")]
     available: f32,
 
     // Total founds held for dispute.
     // Should be equal to (total - available).
+    #[serde(with = "four_precision_number_format")]
     held: f32,
 
     // The total funds that are available or held.
-    //This should be equal to (available + held).
+    // This should be equal to (available + held).
+    #[serde(with = "four_precision_number_format")]
     total: f32,
 
     // When charge back occurs, account is locked.
@@ -77,6 +80,27 @@ fn write_accounts(accounts: &[Account], write_impl: &mut impl Write) -> Result<(
 
     writer.flush()?;
     Ok(())
+}
+
+mod four_precision_number_format {
+    use serde::{self, Deserialize, Deserializer, Serializer};
+
+    pub fn serialize<S>(number: &f32, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let precision = 4;
+        let s = format!("{number:.precision$}");
+        serializer.serialize_str(&s)
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<f32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let s = String::deserialize(deserializer)?;
+        s.parse::<f32>().map_err(serde::de::Error::custom)
+    }
 }
 
 #[cfg(test)]
@@ -136,5 +160,21 @@ mod test {
         let expected = std::fs::read_to_string("testdata/accounts.csv");
         assert!(expected.is_ok());
         assert_eq!(data.unwrap(), expected.unwrap());
+    }
+
+    #[test]
+    fn test_serialize_output_four_decimal_precision() {
+        let accounts = vec![Account {
+            client_id: 2,
+            available: 2.0,
+            held: 0.0,
+            total: 2.0000,
+            locked: false,
+        }];
+
+        let mut output: Vec<u8> = Vec::new();
+        write_accounts(&accounts, &mut output).unwrap();
+        let data = String::from_utf8(output).unwrap();
+        assert!(data.contains("2.0000"));
     }
 }
