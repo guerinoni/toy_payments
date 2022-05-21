@@ -1,6 +1,7 @@
 use csv::Writer;
 use serde::Deserialize;
 use serde::Serialize;
+use std::collections::HashMap;
 use std::error::Error;
 use std::io::Write;
 use std::process;
@@ -47,7 +48,7 @@ fn read_csv(path: &str) -> Result<Vec<Transaction>, Box<dyn Error>> {
     Ok(transactions)
 }
 
-#[derive(Serialize)]
+#[derive(Default, Serialize)]
 struct Account {
     // Client ID.
     #[serde(rename = "client")]
@@ -100,6 +101,41 @@ mod four_precision_number_format {
     {
         let s = String::deserialize(deserializer)?;
         s.parse::<f32>().map_err(serde::de::Error::custom)
+    }
+}
+
+enum TransactionType {
+    Deposit,
+}
+
+impl std::str::FromStr for TransactionType {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "deposit" => Ok(TransactionType::Deposit),
+            _ => Err(format!("'{}' is not a valid value for TransactionType", s)),
+        }
+    }
+}
+
+#[derive(Default)]
+struct Engine {
+    client_account: HashMap<u16, Account>,
+}
+
+impl Engine {
+    fn process_transaction(&mut self, tr: &Transaction) {
+        match tr.kind.parse().unwrap() {
+            TransactionType::Deposit => {
+                self.client_account
+                    .entry(tr.client_id)
+                    .and_modify(|account| {
+                        account.available += tr.amount;
+                        account.total += tr.amount;
+                    });
+            }
+        }
     }
 }
 
@@ -176,5 +212,30 @@ mod test {
         write_accounts(&accounts, &mut output).unwrap();
         let data = String::from_utf8(output).unwrap();
         assert!(data.contains("2.0000"));
+    }
+
+    #[test]
+    fn test_deposit_increase_total_and_available() {
+        let t = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 1.0,
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+        e.process_transaction(&t);
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 2.0);
+        assert_eq!(account.available, account.total);
     }
 }
