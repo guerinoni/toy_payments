@@ -348,6 +348,40 @@ mod test {
 
         let account = e.client_account.get(&1u16).unwrap();
         assert_eq!(account.available, 1.0);
-        // assert_eq!(account.held, 10.0);
+        assert_eq!(account.held, 10.0);
+    }
+
+    #[test]
+    fn test_dispute_refere_to_not_existing_transaction() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "dispute".to_string(),
+            client_id: 1,
+            transaction_id: 2,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.held, 0.0);
+        assert_eq!(account.total, 11.0);
     }
 }
