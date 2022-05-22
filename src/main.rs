@@ -12,9 +12,34 @@ fn main() {
         process::exit(1);
     }
 
-    match read_csv(&args.last().unwrap()) {
-        Ok(_) => todo!(),
-        Err(_) => todo!(),
+    let transactions = match read_csv(&args.last().unwrap()) {
+        Ok(t) => t,
+        Err(e) => {
+            println!("input error: {}", e);
+            process::exit(2);
+        }
+    };
+
+    let mut engine = Engine::default();
+    match engine.process_transactions(&transactions) {
+        Ok(()) => (),
+        Err(e) => {
+            println!("process error: {}", e);
+            process::exit(3);
+        }
+    }
+
+    let accounts = engine
+        .client_account
+        .iter()
+        .map(|a| a.1)
+        .collect::<Vec<_>>();
+    match write_accounts(&accounts, &mut std::io::stdout()) {
+        Ok(()) => (),
+        Err(e) => {
+            println!("writing error: {}", e);
+            process::exit(4);
+        }
     }
 }
 
@@ -86,7 +111,7 @@ fn write_accounts(
 }
 
 mod four_precision_number_format {
-    use serde::{self, Deserialize, Deserializer, Serializer};
+    use serde::Serializer;
 
     pub fn serialize<S>(number: &f32, serializer: S) -> Result<S::Ok, S::Error>
     where
@@ -95,14 +120,6 @@ mod four_precision_number_format {
         let precision = 4;
         let s = format!("{number:.precision$}");
         serializer.serialize_str(&s)
-    }
-
-    pub fn deserialize<'de, D>(deserializer: D) -> Result<f32, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        let s = String::deserialize(deserializer)?;
-        s.parse::<f32>().map_err(serde::de::Error::custom)
     }
 }
 
