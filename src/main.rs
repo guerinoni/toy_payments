@@ -109,6 +109,7 @@ enum TransactionType {
     Withdrawal,
     Dispute,
     Resolve,
+    Chargeback,
 }
 
 impl std::str::FromStr for TransactionType {
@@ -120,6 +121,7 @@ impl std::str::FromStr for TransactionType {
             "withdrawal" => Ok(TransactionType::Withdrawal),
             "dispute" => Ok(TransactionType::Dispute),
             "resolve" => Ok(TransactionType::Resolve),
+            "chargeback" => Ok(TransactionType::Chargeback),
             _ => Err(format!("'{}' is not a valid value for TransactionType", s)),
         }
     }
@@ -190,6 +192,25 @@ impl Engine {
                     let amount = transactions[idx].amount;
                     account.available += amount;
                     account.held -= amount;
+                }
+                TransactionType::Chargeback => {
+                    let idx = match transactions
+                        .iter()
+                        .position(|t| t.transaction_id == tr.transaction_id)
+                    {
+                        Some(index) => index,
+                        None => continue,
+                    };
+
+                    match self.transaction_under_dispute.get(&idx) {
+                        Some(_) => self.transaction_under_dispute.remove(&idx),
+                        None => continue,
+                    };
+
+                    let amount = transactions[idx].amount;
+                    account.held -= amount;
+                    account.total -= amount;
+                    account.locked = true;
                 }
             }
         }
@@ -495,6 +516,115 @@ mod test {
         };
         let t1 = Transaction {
             kind: "resolve".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.total, 11.0);
+        assert_eq!(account.held, 0.0);
+    }
+
+    #[test]
+    fn test_chargeback_decrease_total_decrease_held_and_lock() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "dispute".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+        let t2 = Transaction {
+            kind: "chargeback".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1, t2]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 1.0);
+        assert_eq!(account.total, 1.0);
+        assert_eq!(account.held, 0.0);
+        assert!(account.locked);
+    }
+
+    #[test]
+    fn test_chargeback_refere_to_not_existing_transaction() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "chargeback".to_string(),
+            client_id: 1,
+            transaction_id: 11,
+            ..Default::default()
+        };
+
+        let a = Account {
+            client_id: 1,
+            total: 1.0,
+            available: 1.0,
+            held: 0.0,
+            ..Default::default()
+        };
+
+        let mut e = Engine::default();
+        e.client_account.insert(a.client_id, a);
+
+        assert!(e.process_transactions(&vec![t0, t1]).is_ok());
+
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 11.0);
+        assert_eq!(account.total, 11.0);
+        assert_eq!(account.held, 0.0);
+    }
+
+    #[test]
+    fn test_chargeback_refere_to_transaction_not_under_dispute() {
+        let t0 = Transaction {
+            kind: "deposit".to_string(),
+            client_id: 1,
+            transaction_id: 1,
+            amount: 10.0,
+        };
+        let t1 = Transaction {
+            kind: "chargeback".to_string(),
             client_id: 1,
             transaction_id: 1,
             ..Default::default()
