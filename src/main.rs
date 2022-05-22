@@ -29,12 +29,7 @@ fn main() {
         }
     }
 
-    let accounts = engine
-        .client_account
-        .iter()
-        .map(|a| a.1)
-        .collect::<Vec<_>>();
-    match write_accounts(&accounts, &mut std::io::stdout()) {
+    match write_accounts(&engine.get_accounts(), &mut std::io::stdout()) {
         Ok(()) => (),
         Err(e) => {
             println!("writing error: {}", e);
@@ -238,6 +233,10 @@ impl Engine {
         }
 
         Ok(())
+    }
+
+    fn get_accounts(&self) -> Vec<&Account> {
+        self.client_account.iter().map(|a| a.1).collect::<Vec<_>>()
     }
 }
 
@@ -677,13 +676,8 @@ mod test {
         let mut engine = Engine::default();
         let ret = engine.process_transactions(&transactions);
         assert!(ret.is_ok());
-        let accounts = engine
-            .client_account
-            .iter()
-            .map(|a| a.1)
-            .collect::<Vec<_>>();
         let mut output: Vec<u8> = Vec::new();
-        let ret = write_accounts(&accounts, &mut output);
+        let ret = write_accounts(&engine.get_accounts(), &mut output);
         assert!(ret.is_ok());
 
         let data = String::from_utf8(output).unwrap();
