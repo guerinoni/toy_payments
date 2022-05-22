@@ -90,6 +90,10 @@ struct Account {
 
     // When charge back occurs, account is locked.
     locked: bool,
+
+    // Simple index use to order accounts as same as arrived in input.
+    #[serde(skip_serializing)]
+    arrival_index: usize,
 }
 
 fn write_accounts(
@@ -153,14 +157,16 @@ struct Engine {
 
 impl Engine {
     fn process_transactions(&mut self, transactions: &[Transaction]) -> Result<(), Box<dyn Error>> {
+        let mut arrival_order = 0_usize;
         for tr in transactions {
-            let account = self
-                .client_account
-                .entry(tr.client_id)
-                .or_insert_with(|| Account {
+            let account = self.client_account.entry(tr.client_id).or_insert_with(|| {
+                arrival_order += 1;
+                Account {
                     client_id: tr.client_id,
+                    arrival_index: arrival_order,
                     ..Default::default()
-                });
+                }
+            });
 
             match tr.kind.parse().unwrap() {
                 TransactionType::Deposit => {
@@ -236,7 +242,9 @@ impl Engine {
     }
 
     fn get_accounts(&self) -> Vec<&Account> {
-        self.client_account.iter().map(|a| a.1).collect::<Vec<_>>()
+        let mut v = self.client_account.iter().map(|a| a.1).collect::<Vec<_>>();
+        v.sort_by_key(|&k|k.arrival_index);
+        v
     }
 }
 
@@ -274,17 +282,15 @@ mod test {
         let a = Account {
             client_id: 1,
             available: 1.5,
-            held: 0.0,
             total: 1.5,
-            locked: false,
+            ..Default::default()
         };
 
         let b = Account {
             client_id: 2,
             available: 2.0,
-            held: 0.0,
             total: 2.0,
-            locked: false,
+            ..Default::default()
         };
 
         let accounts = vec![&a, &b];
@@ -301,13 +307,13 @@ mod test {
 
     #[test]
     fn test_serialize_output_four_decimal_precision() {
-        let accounts = vec![&Account {
+        let a = Account {
             client_id: 2,
             available: 2.0,
-            held: 0.0,
             total: 2.0000,
-            locked: false,
-        }];
+            ..Default::default()
+        };
+        let accounts = vec![&a];
 
         let mut output: Vec<u8> = Vec::new();
         write_accounts(&accounts, &mut output).unwrap();
