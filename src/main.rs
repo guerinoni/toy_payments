@@ -2,8 +2,7 @@ use csv::Writer;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::error::Error;
-use std::fmt::format;
-use std::io::{ErrorKind, Write};
+use std::io::Write;
 use std::process;
 
 fn main() {
@@ -73,7 +72,10 @@ struct Account {
     locked: bool,
 }
 
-fn write_accounts(accounts: &[Account], write_impl: &mut impl Write) -> Result<(), Box<dyn Error>> {
+fn write_accounts(
+    accounts: &[&Account],
+    write_impl: &mut impl Write,
+) -> Result<(), Box<dyn Error>> {
     let mut writer = Writer::from_writer(write_impl);
     for a in accounts.iter() {
         writer.serialize(a)?;
@@ -140,10 +142,13 @@ struct Engine {
 impl Engine {
     fn process_transactions(&mut self, transactions: &[Transaction]) -> Result<(), Box<dyn Error>> {
         for tr in transactions {
-            let account = match self.client_account.get_mut(&tr.client_id) {
-                Some(a) => a,
-                None => return Err("engine error: Client ID not found".into()),
-            };
+            let account = self
+                .client_account
+                .entry(tr.client_id)
+                .or_insert_with(|| Account {
+                    client_id: tr.client_id,
+                    ..Default::default()
+                });
 
             match tr.kind.parse().unwrap() {
                 TransactionType::Deposit => {
@@ -266,7 +271,7 @@ mod test {
             locked: false,
         };
 
-        let accounts = vec![a, b];
+        let accounts = vec![&a, &b];
 
         let mut output: Vec<u8> = Vec::new();
         let ret = write_accounts(&accounts, &mut output);
@@ -280,7 +285,7 @@ mod test {
 
     #[test]
     fn test_serialize_output_four_decimal_precision() {
-        let accounts = vec![Account {
+        let accounts = vec![&Account {
             client_id: 2,
             available: 2.0,
             held: 0.0,
@@ -647,5 +652,32 @@ mod test {
         assert_eq!(account.available, 11.0);
         assert_eq!(account.total, 11.0);
         assert_eq!(account.held, 0.0);
+    }
+
+    #[test]
+    fn test_only_deposit() {
+        let transactions = read_csv("testdata/transactions.csv").unwrap();
+        let mut engine = Engine::default();
+        let ret = engine.process_transactions(&transactions);
+        assert!(ret.is_ok());
+        let accounts = engine
+            .client_account
+            .iter()
+            .map(|a| a.1)
+            .collect::<Vec<_>>();
+        let mut output: Vec<u8> = Vec::new();
+        let ret = write_accounts(&accounts, &mut output);
+        assert!(ret.is_ok());
+
+        let data = String::from_utf8(output).unwrap();
+        assert_eq!(
+            String::from(
+                "client,available,held,total,locked
+1,1.0191,0.0000,1.0191,false
+2,2.0001,0.0000,2.0001,false
+"
+            ),
+            data
+        )
     }
 }
