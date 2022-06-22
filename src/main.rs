@@ -176,10 +176,10 @@ impl Engine {
                 TransactionType::Withdrawal => {
                     if account.available < tr.amount {
                         let msg = format!(
-                            "engine error: Client ID {} doesn't have sufficient avalable",
+                            "engine error: Client ID {} doesn't have sufficient available",
                             account.client_id
                         );
-                        return Err(msg.into());
+                        break;
                     }
                     account.available -= tr.amount;
                     account.total -= tr.amount;
@@ -243,7 +243,7 @@ impl Engine {
 
     fn get_accounts(&self) -> Vec<&Account> {
         let mut v = self.client_account.iter().map(|a| a.1).collect::<Vec<_>>();
-        v.sort_by_key(|&k|k.arrival_index);
+        v.sort_by_key(|&k| k.arrival_index);
         v
     }
 }
@@ -389,7 +389,9 @@ mod test {
 
         let mut e = Engine::default();
         e.client_account.insert(a.client_id, a);
-        assert!(e.process_transactions(&vec![t]).is_err());
+        assert!(e.process_transactions(&vec![t]).is_ok());
+        let account = e.client_account.get(&1u16).unwrap();
+        assert_eq!(account.available, 3.0);
     }
 
     #[test]
